@@ -1,0 +1,10 @@
+language,keywords
+julia,function|struct|mutable struct|abstract type|macro|module
+rust,fn|struct|enum|trait|type|mod
+python,def|class
+javascript,function|class|const|let|var
+typescript,function|class|interface|type|enum|const|let
+go,func|type|interface|struct
+haskell,data|type|newtype|class|instance|module
+c,typedef|struct|enum
+cpp,class|struct|namespace|template|typedef
