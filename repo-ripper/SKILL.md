@@ -1,3 +1,15 @@
+---
+name: repo-ripper
+description: Guide for documenting software codebases using a dual-tag system combining call-graph structure with subject domain. Use when ripping through a repository and documenting its design and implementation to create a cohesive, deeply linked knowledge base.
+keywords:
+  - code documentation
+  - repository analysis
+  - note-taking
+  - knowledge base
+  - software design
+  - implementation documentation
+---
+
 # repo-ripper Skill
 
 This skill provides guidelines for structured note-taking and documentation for software codebases. It is designed to create a cohesive, deeply linked knowledge base by ripping through a repository and documenting its design and implementation.
