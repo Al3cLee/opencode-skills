@@ -25,9 +25,31 @@ This guide defines the standards for writing technical documents, including repo
 
 ---
 
-## Core Structure
+## Narration Stages
 
-Every technical note or document should follow this four-part structure:
+Every technical note or document should follow a four-part structure:
+
+1. motivation
+2. discussion
+3. results
+4. remarks
+
+Each part is called a "narration stage". After all four stages are reached, you have completed a narration cycle. Then, you may start again with a new motivation stage.
+
+ALL technical notes are ALWAYS a combination of one or more narration cycles. Each narration cycle always contains the four parts. A technical note's structure can look like this:
+
+```markdown
+**Motivation.** ...
+**Discussion.** ...
+**Result.** ...
+**Remark.**...
+**Remark.**
+
+**Motivation.** Building on our previous result, we are now curious to define... via... which we do not know yet... so let us consider...
+**Discussion.** ...
+**Result.** ...
+**Remark.**...
+```
 
 ### 1. Motivation
 
@@ -51,7 +73,6 @@ Each "result" should:
 
 Example format: "For [xx], assuming [xxx], by doing [xxx] and [xxx], we have that [xxx]."
 
-
 ### 4. Remarks
 
 After arriving at a result, take time to reflect on the Q&A session and make remarks. Remarks can be qualitative arguments which, without understanding technical details, are hard to appreciate. Imagine there is an inquisitive reader who might challenge your argument, and answer this inquisitive reader.
@@ -60,24 +81,12 @@ Following each result, include remarks concerning:
 - The result's scope: this follows from the key assumptions made during the derivation.
 - Room for improvement: this follows from the result's scope and derivation.
 ---
+## Style Conventions
 
-## Q&A Framework
-
-Technical notes investigate a topic in detail, which can be re-framed as "asking relevant questions concerning a topic, and then answering them in detail." There may be multiple iterations of this Q&A process within a single piece of note.
-
-In the Q&A context:
-- The **motivation paragraph** raises a question
-- The **discussion and result sections** answer it
-- The **remarks section** reflects upon this Q&A process
-
----
-
-## Formatting Conventions
-
-In this knowledge system, technical notes are usually structured as above, but the different parts may not be marked explicitly by a title (e.g., `## Motivation`). Instead:
-
-- Horizontal rules are inserted between different stages of narration
-- Titles indicate **topics**, not sections of the structure
+- ALWAYS use a bold run-in title in the first paragraph of each part: the first paragraph of motivation should be `**Motivation. ** We consider ...`, etc.
+- Titles indicate **topics**, not sections of the structure. DO NOT use markdown headings to indicate narration stage.
+- ALWAYS use a continuous narration flow, in spite of non-text elements inserted into a paragraph, e.g. code blocks, equations, pictures. NEVER let these disrupt your narration flow. For code blocks, let your narration flow into the comments in the code, and then flow back to text.
+- NEVER use bullet lists for purposes other than plainly listing things.
 
 ---
 
@@ -103,6 +112,6 @@ In this knowledge system, technical notes are usually structured as above, but t
 - When earlier concepts require later ones to elaborate, do not hesitate to mention the later ones (in wiki-links). Arranging concepts in a perfectly logical order is against the nature of programs—functionalities are developed with each other in mind, not in a rigid logical sequence.
 
 **Clarity Enhancements**:
-- Provide a glossary of technical terms
+- ALWAYS provide a glossary of technical terms: any new jargon introduced in this note MUST be included.
 - Always try to provide a real-life example which seem trivial but embeds insightful conceptual progress.
-- Provide a minimum working example for each key concept
+- Provide a minimum working example for each key concept.
