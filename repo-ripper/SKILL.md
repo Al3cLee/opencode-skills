@@ -18,14 +18,94 @@ This skill provides guidelines for structured note-taking and documentation for 
 
 - Extend the global `note-writer` skill.
 - Implement a dual-tag system combining the call-graph structure with the subject domain.
+- CLI tools: `rg`, `fd`, `sd`.
+
+## CLI Tools Reference
+
+This skill relies on three CLI tools. Below are the GitHub repositories and installation instructions for each.
+
+### ripgrep (`rg`)
+
+**GitHub**: [BurntSushi/ripgrep](https://github.com/BurntSushi/ripgrep)
+
+A line-oriented search tool that recursively searches directories for a regex pattern while respecting your gitignore. It is the fastest search tool for codebases.
+
+**Installation**:
+```bash
+# macOS Homebrew
+brew install ripgrep
+
+# Linux (Debian/Ubuntu)
+apt-get install ripgrep
+
+# Fedora
+dnf install ripgrep
+
+# Arch Linux
+pacman -S ripgrep
+
+# From binaries: https://github.com/BurntSushi/ripgrep/releases
+
+# From source (requires Rust)
+cargo install ripgrep
+```
+
+### fd
+
+**GitHub**: [sharkdp/fd](https://github.com/sharkdp/fd)
+
+A simple, fast and user-friendly alternative to `find`. It provides sensible defaults for recursive directory traversal with regex and glob-based patterns.
+
+**Installation**:
+```bash
+# macOS Homebrew
+brew install fd
+
+# Ubuntu/Debian
+apt install fd-find  # binary is named fdfind; link to fd
+
+# Fedora
+dnf install fd-find
+
+# Arch Linux
+pacman -S fd
+
+# From binaries: https://github.com/sharkdp/fd/releases
+
+# From source (requires Rust)
+cargo install fd-find
+```
+
+### sd
+
+**GitHub**: [chmln/sd](https://github.com/chmln/sd)
+
+An intuitive find & replace CLI and a sed alternative. It uses regex syntax familiar from JavaScript and Python, making it far easier to read and write than sed.
+
+**Installation**:
+```bash
+# From source (requires Rust)
+cargo install sd
+
+# From binaries: https://github.com/chmln/sd/releases
+```
+
+**Why sd over sed?**
+```bash
+# Replace all occurrences — sd is simpler
+sd before after file.txt
+
+# vs sed
+sed -i -e 's/before/after/g' file.txt
+```
 
 ## Tagging Convention
 
-Notes must use a dual-tag system to categorize content along two independent axes: (1) where the component sits in the software architecture (call-graph tag), and (2) what conceptual domain it belongs to (domain tag).
+Notes must use a dual-tag system to categorize content along two independent axes: (1) where the component sits in the software architecture (location tag), and (2) what conceptual domain it belongs to (domain tag).
 
 NEVER create tags that conflict with existing ones in the knowledge garden: if `#math/algebra/groups` already exists, do not write `#math/groups`. Before creating tags, search the existing knowledge garden with `rg` or `sk` to check for conflicts.
 
-### 1. Call-Graph Tags
+### 1. Location Tags
 
 These tags encode the component's position in the source tree. The root is always the package name, followed by the directory path (preserved as-is from the file system), ending with the specific type, interface, function, or concept being documented.
 
@@ -51,7 +131,9 @@ These tags categorize the underlying subject matter or technology.
 
 ## Locate Package Root
 
-Before assigning any tags, determine the package root — the directory containing the project manifest. This is a one-time step per ripping session.
+ALWAYS ask the user to provide the root for your session. Determining this on your own is ONLY A FALLBACK.
+
+You can determine the package root via
 
 ```bash
 fd -d3 '(Cargo\.toml|pyproject\.toml|go\.mod|Package\.toml|package\.json|setup\.py|CMakeLists\.txt|Mix\.exs|dune-project)'
@@ -63,7 +145,7 @@ Pick the marker closest to the source files being documented. For monorepos with
 
 ## Tag Assignment
 
-Call-graph tags are derived deterministically from the component's file path in the source tree. The folder structure is preserved as-is — no stripping of `src/`, `lib/`, or similar segments.
+Location tags are derived deterministically from the component's file path in the source tree. The folder structure is preserved as-is — no stripping of `src/`, `lib/`, or similar segments.
 
 ### Step 1: Identify the language
 
@@ -74,6 +156,7 @@ Determine the language from file extensions or user input. Look up declaration k
 ```bash
 rg "(keyword1|keyword2|...)\s+<SymbolName>" -l
 ```
+where `keyword1|keyword2|...` is the field `keywords` in `declaration-keywords.csv`.
 
 Fallback if the keyword search returns nothing:
 
@@ -81,43 +164,45 @@ Fallback if the keyword search returns nothing:
 rg -w "<SymbolName>" -l
 ```
 
-### Step 3: Tie-break among candidates
+In this case, use your own heuristic judgement to determine which mentions qualify as "defining" and which are just "mentioning".
 
-When multiple files declare the same symbol, select the canonical definition:
+### Step 3: Gather candidates
 
-1. Exclude files under `test/`, `spec/`, `bench/` directories
-2. Among the remaining candidates, sort by shallowest path (fewest `/` segments), then alphabetically
-3. If all candidates were excluded in step 1, fall back to the full unsorted list and apply step 2 only
+Exclude files under `test/`, `spec/`, `bench/` directories.
 
 ```bash
 candidates=$(rg "(keyword1|keyword2|...)\s+<SymbolName>" -l | rg -v '/(test|spec|bench)/')
 if [ -z "$candidates" ]; then
   candidates=$(rg "(keyword1|keyword2|...)\s+<SymbolName>" -l)
 fi
-echo "$candidates" | awk -F/ '{print NF, $0}' | sort -t' ' -k1,1n -k2 | cut -d' ' -f2- | head -1
 ```
 
-**Multi-definition components** (Julia multi-methods, Rust trait impls, extension methods): one tag per conceptual component. All non-canonical definition sites are recorded in the cross-reference CSV (see below), not as separate tags.
+**Multi-definition components** (Julia multi-methods, Rust trait impls, C++ headers/sources): Generate one Locator Tag for EVERY file where the component is defined or extended. Insert all of these tags at the very top of the note (below the YAML frontmatter, above the `<h1>` title). Each tag should occupy a whole line; never put two tags on the same line.
 
-### Step 4: Convert the file path to a tag
+### Step 4: Convert the file paths to tags
 
+For every path in the candidates list:
 1. Strip the package root directory prefix
 2. Strip the file extension
 3. Prepend `#<package-name>/`, append `/<SymbolName>`
 
 ```bash
-echo "<winning-path>" \
-  | sd '^<package-root-dir>/' '' \
-  | sd '\.[^.]*$' '' \
-  | sd '^(.+)$' '#<package-name>/$1/<SymbolName>'
+echo "$candidates" | while read -r path; do
+  echo "$path" \
+    | sd '^<package-root-dir>/' '' \
+    | sd '\.[^.]*$' '' \
+    | sd '^(.+)$' '#<package-name>/$1/<SymbolName>'
+done
 ```
 
-**Example**: package root `spenso/`, package name `spenso`, winning path `spenso/src/tensors/data/dense.rs`, symbol `DenseTensor`:
+**Example**: package root `spenso/`, package name `spenso`, multiple definition paths `spenso/src/tensors/data/dense.rs` and `spenso/src/tensors/math/add.rs`, symbol `DenseTensor`:
 
 ```
 spenso/src/tensors/data/dense.rs
-→ src/tensors/data/dense          (strip prefix + extension)
 → #spenso/src/tensors/data/dense/DenseTensor
+
+spenso/src/tensors/math/add.rs
+→ #spenso/src/tensors/math/add/DenseTensor
 ```
 
 ## Cross-Reference Discovery
@@ -150,24 +235,44 @@ rg -n "<SymbolName>" <search-path> \
 
 Every technical note must follow a strict logical flow that maps to a "Design -> Implement -> MWE -> Caveats" structure:
 
+**Example Header:**
+```markdown
+---
+finished: false
+---
+#spenso/src/tensors/data/dense/DenseTensor
+#spenso/src/tensors/math/add/DenseTensor
+#physics/quantum-mechanics
+
+# DenseTensor
+```
+
 1.  **Motivation (Design Principle)**
     *   **Purpose**: The high-level theory, design principle, or motivation. Why does this module/component exist?
     *   **Content**: What problem does it solve? What is the core abstraction idea?
     *   **Rule**: *Never hide abstractions behind syntactic sugar.* State the raw design principle clearly before showing how a language or framework simplifies its expression.
 
-2.  **Discussion (Implementation Detail)**
+2.  **Encapsulates (Downward Abstraction)**
+    *   **Purpose**: What underlying complexity does this component hide?
+    *   **Content**: Use `[[wikilinks]]` to the internal modules, types, or utilities this component imports or calls.
+
+3.  **Exposed To (Upward Abstraction)**
+    *   **Purpose**: How is this component meant to be used by the wider system?
+    *   **Content**: Use `[[wikilinks]]` to the components that import or call this one (derived from the cross-reference discovery).
+
+4.  **Discussion (Implementation Detail)**
     *   **Purpose**: Technical implementation details.
     *   **Content**: How is the design principle realized in the code? What are the key data structures or algorithms used internally?
 
-3.  **Result (Minimum Working Example - MWE)**
+5.  **Result (Minimum Working Example - MWE)**
     *   **Purpose**: Practical code snippet demonstrating usage.
     *   **Content**: A minimal, self-contained, reproducible code block showing how to use the component.
 
-4.  **Remark (Caveats & Composition)**
+6.  **Remark (Caveats & Composition)**
     *   **Purpose**: Known limitations, warnings, edge cases, and interactions.
     *   **Content**: How does this compose with other modules or tools? What are the performance implications? What should the user *not* do?
 
-5.  **Glossary** (Optional but recommended)
+7.  **Glossary** (Mandatory)
     *   **Purpose**: Definitions for key terms used in the note.
 
 ## Narration Flow
