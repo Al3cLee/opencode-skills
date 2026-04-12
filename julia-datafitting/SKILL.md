@@ -94,8 +94,8 @@ using CairoMakie
 
 x = range(0, 10, length = 100)
 
-# Create the wrapper `fig`
-fig = Figure()
+# Create the wrapper `fig` with safeguarding padding 50
+fig = Figure(figure_padding=50)
 
 # Create an axis with title and labels
 ax = Axis(fig[1, 1], title = "Line Plots", xlabel = "X", ylabel = "Y")
@@ -110,12 +110,51 @@ lines!(ax, x, cos.(x), color = :blue, label = "cos")
 # ALWAYS remember to add legends!
 axislegend(ax; position = :rb, labelsize = 15)
 
+# prevent contents from exceeding Figure frame, then save
+# ALWAYS apply resize_to_layout to fig before saving!
+resize_to_layout!(fig)
 save("plot_lines6.pdf", fig)
 println("sin plot generation success!")
 fig
 ```
 
 Use the `autolimitaspect` argument of `Axis` to tune the ratio between x and y axes when instructed. Always include an axis legend. After plotting, always save to a .pdf file with filename identical to the source .csv name.
+
+## Error Report
+
+All fittings should include an error report. The key metric is the **mean relative error** (as a percentage, unitless quantity), defined as `mean(|y - y_est| / y) * 100`, where `y` is the observed value and `y_est` is the predicted value.
+
+### Case 1: Fitting target = original physical formula
+
+When the fitting target function matches the physical formula directly, `residuals(sol)` returns values in the original physical units. Compute the mean relative error directly:
+
+```julia
+y_est = predict(sol)
+rel_errs = abs.(residuals(sol)) ./ y
+mean_rel_err_pct = mean(rel_errs) * 100
+```
+
+Equivalently, `abs.(y .- y_est) ./ y` gives the same element-wise relative errors.
+
+### Case 2: Fitting target is a transform of the physical formula
+
+When the fitting target function is a transformed version of the physical formula (e.g., a log-log target for a power-law physical relation), `residuals(sol)` and `predict(sol)` live in the **transformed** space. Using them directly for relative error is wrong because the units no longer match the original physical quantity. Instead, apply `predict()` then the **inverse transform** to recover predictions in the original space:
+
+```julia
+# Example: power law y = a * x^b
+# Fitting target: log(y) = log(a) + b * log(x)
+# Inverse transform: y_est = exp(predict(sol))
+
+y_est = exp.(predict(sol))
+rel_errs = abs.(y .- y_est) ./ y
+mean_rel_err_pct = mean(rel_errs) * 100
+```
+
+The general pattern is: call `predict()` on the solution, apply the inverse of whatever transform was applied to obtain the fitting target, then compute relative errors against the original observed values.
+
+### Note on StatsAPI
+
+StatsAPI provides `residuals()`, `predict()`, `mse()`, `rmse()`, `r2()`, `confint()`, etc., but does **not** provide a built-in for mean relative/percentage error (MAPE). Always compute it manually as shown above.
 
 ## Julia CLI Usage
 
@@ -136,5 +175,5 @@ The syntax for non-REPL mode (direct CLI mode) passes a string after the `-e` fl
 Install necessary packages for data fitting workflows:
 
 ```bash
-julia --project=. -e 'using Pkg; Pkg.add(["CSV","DataFrames","CairoMakie","CurveFit"])'
+julia --project=. -e 'using Pkg; Pkg.add(["CSV","DataFrames","CairoMakie","CurveFit","Unitful","Measurements", "Statistics"])'
 ```

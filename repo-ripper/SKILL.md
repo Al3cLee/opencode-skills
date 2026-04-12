@@ -8,6 +8,7 @@ keywords:
   - knowledge base
   - software design
   - implementation documentation
+allowed-tools: ["LSP", "Read", "Glob", "Grep", "Bash"]
 ---
 
 # repo-ripper Skill
@@ -31,6 +32,7 @@ Use this skill when the task requires repository analysis and durable documentat
 - Use `declaration-keywords.csv` to map language to declaration keywords.
 - Use `references/cli-tools.md` for tool references, installation commands, and command rationale.
 - Use `references/narration-flow.md` for coherent narration examples.
+- For Rust projects: use `rust-analyzer` LSP for semantic definition search and cross-reference discovery (see Rust LSP Enhancement section).
 - If `~/silverbullet-space-agent/atomic_notes.md` is unavailable, apply this fallback rule: keep notes atomic (exactly one component per note) and link related ideas with `[[wikilinks]]` instead of duplicating content.
 
 ## Tagging Convention
@@ -228,6 +230,192 @@ For narration guidance and examples, read `references/narration-flow.md`.
 - Store long-form architecture/tutorial content under `<package-name>/Tutorial/`.
 - Write tutorials only after enough atomic notes exist to support cross-linking.
 - Keep all documentation as either atomic notes or tutorials; avoid a third category.
+
+## Rust LSP Enhancement
+
+When the target language is Rust and rust-analyzer LSP is available, replace the heuristic `rg`-based steps with LSP operations for higher precision. The `rg`-based steps remain the universal fallback when LSP is unavailable.
+
+### Activation Condition
+
+Apply this section when **all** of the following are true:
+1. The package root contains `Cargo.toml`
+2. The LSP server (rust-analyzer) is running and responsive
+3. The project compiles without fatal errors (LSP needs valid analysis)
+
+If any condition fails, fall back to the default `rg`/`fd`/`sd` workflow.
+
+### Step 2 Replacement: Definition Search via LSP
+
+Replace the `rg` keyword search with LSP workspace symbol lookup.
+
+```
+LSP(
+  operation: "workspaceSymbol",
+  filePath: "src/lib.rs",
+  line: 1,
+  character: 1
+)
+```
+
+Filter results by symbol name matching the target component.
+
+Once a candidate file:line is found, verify it is the definition (not a reference) using:
+
+```
+LSP(
+  operation: "goToDefinition",
+  filePath: "<candidate-file>",
+  line: <candidate-line>,
+  character: <candidate-character>
+)
+```
+
+If the definition resolves to a different location (e.g., a re-export), use the resolved location as the canonical definition.
+
+**Fallback**: If `workspaceSymbol` returns no results or LSP is unavailable, use the `rg` keyword search from Step 2 of the default workflow.
+
+### Cross-Reference Discovery Replacement via LSP
+
+Replace the cascading `rg` search patterns with a single LSP `findReferences` call.
+
+```
+LSP(
+  operation: "findReferences",
+  filePath: "<definition-file>",
+  line: <definition-line>,
+  character: <definition-character>
+)
+```
+
+This provides semantically precise references, including:
+- Re-exports (`pub use crate::module::Symbol`)
+- Trait method calls (including via `Deref` / `Into` / blanket impls)
+- Type-alias references
+- Macro-generated code (when expanded by rust-analyzer)
+- Pattern match arms
+
+Record results in the same discovery CSV format:
+
+```
+file,line,context
+src/handler.rs,42,"process_request(req)"
+src/server.rs,15,"fn serve(p: process_request::Request)"
+```
+
+**Fallback**: If LSP is unavailable, use the cascading `rg` search patterns from Cross-Reference Discovery.
+
+### Encapsulates Enhancement: Trait Implementations
+
+For the "Encapsulates" note section, discover what a type encapsulates by finding its trait implementations:
+
+```
+LSP(
+  operation: "goToImplementation",
+  filePath: "<definition-file>",
+  line: <definition-line>,
+  character: <definition-character>
+)
+```
+
+This reveals which traits a struct/enum implements, covering both manual `impl` blocks and `#[derive]` expansions. Create `[[wikilinks]]` to each discovered impl.
+
+### Exposed To Enhancement: Call Hierarchy
+
+For the "Exposed To" note section, discover callers and callees using LSP call hierarchy:
+
+```
+LSP(
+  operation: "prepareCallHierarchy",
+  filePath: "<definition-file>",
+  line: <definition-line>,
+  character: <definition-character>
+)
+```
+
+Then expand:
+
+```
+LSP(
+  operation: "incomingCalls",
+  filePath: "<definition-file>",
+  line: <definition-line>,
+  character: <definition-character>
+)
+```
+
+```
+LSP(
+  operation: "outgoingCalls",
+  filePath: "<definition-file>",
+  line: <definition-line>,
+  character: <definition-character>
+)
+```
+
+Use `incomingCalls` results to populate "Exposed To" (upward callers) and `outgoingCalls` to populate "Encapsulates" (downward dependencies). Recursively expand to depth 2 for broader context.
+
+### Module Structure Enhancement: Document Symbols
+
+When discovering what a module encapsulates, use `documentSymbol` instead of `rg`:
+
+```
+LSP(
+  operation: "documentSymbol",
+  filePath: "src/module/mod.rs",
+  line: 1,
+  character: 1
+)
+```
+
+This provides a structured, hierarchical view of all symbols (structs, enums, functions, traits, impl blocks) in a file, which directly maps to location tags for the "Encapsulates" section.
+
+### Complete Rust Workflow
+
+```
+User: "Document DenseTensor in my Rust crate"
+    │
+    ▼
+[1] Detect Cargo.toml → Rust LSP mode
+    │
+    ▼
+[2] Find definition
+    LSP(workspaceSymbol) → verify with LSP(goToDefinition)
+    │ (fallback: rg keyword search)
+    ▼
+[3] Assign location tag from definition path
+    │
+    ▼
+[4] Find cross-references
+    LSP(findReferences) → discovery CSV
+    │ (fallback: rg cascading patterns)
+    ▼
+[5] Discover encapsulated items
+    LSP(documentSymbol) for containing module
+    LSP(outgoingCalls) for function dependencies
+    LSP(goToImplementation) for trait impls
+    │
+    ▼
+[6] Discover callers
+    LSP(incomingCalls) for upward callers
+    │
+    ▼
+[7] Write atomic note with dual tags and [[wikilinks]]
+    │
+    ▼
+[8] Write discovery CSV
+```
+
+### Precision Comparison
+
+| Aspect | rg-based (default) | LSP-based (Rust) |
+|--------|--------------------|--------------------|
+| Definition search | Regex keyword match | Semantic resolution |
+| Cross-references | Import/call/member patterns | findReferences (exact) |
+| Re-exports | Missed or false positive | Resolved via goToDefinition |
+| Trait impls | `impl.*for` grep | goToImplementation |
+| Call relationships | `symbol(` pattern | incomingCalls/outgoingCalls |
+| Module contents | Regex per file | documentSymbol (structured) |
+| Macro expansions | Not found | Included in references |
 
 ## Validation Checklist
 

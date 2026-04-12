@@ -20,6 +20,8 @@ keywords:
 
 This skill governs how to write, edit, and organize notes in a SilverBullet-based knowledge garden. The knowledge garden is a flat collection of interconnected markdown files where notes are linked by wikilinks, organized by a hierarchical tag system, and kept atomic — each note addresses one and only one topic.
 
+The knowledge garden is at ~/silverbullet-space-agent/.
+
 ## 1. Tagging System
 
 Tags replace folders as the primary organization mechanism. Every note carries one or more hierarchical hashtags of the form:
@@ -42,7 +44,9 @@ There are two equivalent conventions used in this garden:
 1. **Frontmatter `tags` list** — a YAML list under the `tags` key in the frontmatter.
 2. **Inline hashtags** — standalone `#tag` lines in the body.
 
-Either or both may appear. When using inline hashtags, place them immediately after the frontmatter, before the first heading. Example:
+The frontmatter tags indicate document status, eg. `finished`, `date`, while inline tags indicate topic. When using inline hashtags, place them immediately after the frontmatter, before the first heading. Example:
+
+The minimum is: `finished=false` in frontmatter, and at least 1 inline tag about the topic. Never put topic tags into the frontmatter.
 
 ```markdown
 ---
@@ -57,7 +61,7 @@ finished: false
 
 ### Tag vs tags
 
-SilverBullet distinguishes `tag` (the object type, always `"page"` for pages) from `tags` (user-defined topic tags). Never set `tag` manually; only set `tags`.
+SilverBullet distinguishes `tag` (the object type, always `"page"` for pages) from `tags` (user-defined topic tags). Never set `tag` manually; only set `tags`, and always do this via inline syntax.
 
 ## 2. Markdown and Wikilink Syntax
 
@@ -100,6 +104,7 @@ Every note in this garden should be atomic: it addresses **one and only one topi
 2. **Clarity**: The note title (H1 heading) should precisely state the single topic. Avoid vague titles like "Miscellaneous" or "Chapter 3 Notes".
 3. **Link over embed**: When a concept depends on another, link to it rather than duplicating its content. Let the reader follow links at their own pace.
 4. **Self-contained**: A note should be understandable on its own or by following a small number of wikilinks, not by requiring the reader to have read a long sequence of preceding notes.
+5. **Learn by Logic, not Rote**: never shy away from abstractions, or hide them under half-baked examples. Stating the abstraction explicitly is fine, as long as enough down-to-earth explanation follows.
 
 ### Why Atomic
 
@@ -160,8 +165,8 @@ finished: false
 2. Create the file with `snake_case.md` naming.
 3. Add frontmatter with `finished: false`.
 4. Add tag(s) — either as frontmatter `tags` list or inline `#domain/subdomain` lines.
-5. Write the H1 heading as the topic title.
-6. Write the note body following the atomic and (for technical notes) narration-cycle principles.
+5. Write the H1 heading as the topic title. There can be 1 or more H1 heading per note.
+6. Write the note body following the atomic and (for technical notes) narration-cycle principles. 
 7. Insert `[[wikilinks]]` for every concept that has or deserves its own note.
 8. When the note reaches a coherent state, set `finished: true`.
 

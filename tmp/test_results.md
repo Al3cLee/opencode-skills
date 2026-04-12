@@ -1,287 +1,123 @@
-# repo-ripper SKILL.md Test Results
+# repo-ripper Rust LSP Enhancement - Test Results
 
 ## Test Environment
 
-- **Location**: `.tmp/testrepo/`
-- **Tools**: `rg` (ripgrep 15.1.0 with PCRE2), `sd` (1.0.0), bash
-- **Test repo structure**:
-  ```
-  testrepo/
-  ├── src/
-  │   ├── foo/
-  │   │   └── DenseTensor.rs   # struct DenseTensor { data: Vec<i32> }, fn process_tensor(t: DenseTensor) {}
-  │   ├── foobar.rs            # struct FooBar {}
-  │   ├── weird.rs             # struct Foo[0] {}, struct F[0]G {}, struct F[0] {}
-  │   └── mod.rs               # mod dense_tensor;
-  ```
+- **Location**: `skills/tmp/testrepo/`
+- **Tools**: `rg` (ripgrep with PCRE2), `sd` (1.0.0), LSP (rust-analyzer via opencode lsp tool)
+- **Environment**: `OPENCODE_EXPERIMENTAL=true`
+- **Test repo**: Minimal Rust crate with `DenseTensor`, `FooBar`, and module structure
 
-## Test Results
+## LSP Test Results
 
-### Test 1: Symbol escape (CamelCase)
+### B2. workspaceSymbol - PASS
 
-```bash
-#!/bin/bash
-SYMBOL_NAME="DenseTensor"
-SYMBOL_ESCAPED=$(echo "$SYMBOL_NAME" | sd '[\[\]\.\*\+\?\^\$\{\}\(\)\|\\]' '\\$0')
-echo "Input: $SYMBOL_NAME"
-echo "Escaped: $SYMBOL_ESCAPED"
+```
+LSP(operation: "workspaceSymbol", filePath: "src/main.rs", line: 1, character: 1)
 ```
 
-**Output**:
+Result: Returned `DenseTensor` (kind: 23/Struct) at `src/foo/dense_tensor.rs:0:11` and `FooBar` (kind: 23/Struct) at `src/main.rs:13:7`.
+
+Bridged to repo-ripper: Replaces rg keyword search in Step 2. workspaceSymbol returns symbol kind codes (23=Struct, 12=Function, etc.) with exact locations.
+
+### B3. goToDefinition - PASS
+
 ```
-Input: DenseTensor
-Escaped: DenseTensor
-```
-
-Result: No escaping needed for simple CamelCase symbols.
-
----
-
-### Test 2: Symbol escape (with brackets)
-
-```bash
-#!/bin/bash
-SYMBOL_NAME="Foo[0]"
-SYMBOL_ESCAPED=$(echo "$SYMBOL_NAME" | sd '[\[\]\.\*\+\?\^\$\{\}\(\)\|\\]' '\\$0')
-echo "Input: $SYMBOL_NAME"
-echo "Escaped: $SYMBOL_ESCAPED"
+LSP(operation: "goToDefinition", filePath: "src/main.rs", line: 3, character: 25)
 ```
 
-**Output**:
+Result: Resolved to `src/foo/dense_tensor.rs:4:7-4:21` (the `process_tensor` function — char 25 in `use foo::dense_tensor::{process_tensor, DenseTensor}` lands on `process_tensor`).
+
+Key advantage: A `use` statement resolved through the module system to the actual definition, which rg cannot do.
+
+### B4. findReferences - PASS
+
 ```
-Input: Foo[0]
-Escaped: Foo\[0\]
-```
-
-Result: Both `[` and `]` are properly escaped for use in regex patterns.
-
----
-
-### Test 3: Symbol escape (bracket symbol with G suffix - negative case)
-
-```bash
-#!/bin/bash
-SYMBOL_NAME="F[0]"
-SYMBOL_ESCAPED=$(echo "$SYMBOL_NAME" | sd '[\[\]\.\*\+\?\^\$\{\}\(\)\|\\]' '\\$0')
-echo "Input: $SYMBOL_NAME"
-echo "Escaped: $SYMBOL_ESCAPED"
+LSP(operation: "findReferences", filePath: "src/foo/dense_tensor.rs", line: 1, character: 13)
 ```
 
-**Output**:
+Result: Found 4 references:
+1. `src/main.rs:2:40-2:51` — `DenseTensor` in use statement
+2. `src/main.rs:5:12-5:23` — `DenseTensor` in struct literal
+3. `src/foo/dense_tensor.rs:4:25-4:36` — `DenseTensor` as parameter type
+4. `src/foo/dense_tensor.rs:0:11-0:22` — definition site (DenseTensor struct name)
+
+Key advantage over rg: Identifies type-position references (parameter type, constructor) that are semantically precise.
+
+### B5. goToImplementation - PASS (position-sensitive)
+
 ```
-Input: F[0]
-Escaped: F\[0\]
-```
-
-Result: Properly escaped for boundary matching.
-
----
-
-### Test 4: Definition search (with word boundary)
-
-```bash
-#!/bin/bash
-cd .tmp/testrepo
-SYMBOL_NAME="DenseTensor"
-PACKAGE_ROOT="."
-KEYWORDS="struct|fn"
-SYMBOL_ESCAPED=$(echo "$SYMBOL_NAME" | sd '[\[\]\.\*\+\?\^\$\{\}\(\)\|\\]' '\\$0')
-rg -nP "(${KEYWORDS})\s+${SYMBOL_ESCAPED}(?!\w)" "$PACKAGE_ROOT" -l
+LSP(operation: "goToImplementation", filePath: "src/main.rs", line: 14, character: 8)
 ```
 
-**Output**:
+Result: Found 3 implementations:
+1. `src/main.rs:12:16-12:21` — `Debug` (from `#[derive]`)
+2. `src/main.rs:12:9-12:14` — `Clone` (from `#[derive]`)
+3. `src/main.rs:12:23-12:32` — `PartialEq` (from `#[derive]`)
+
+Note: `goToImplementation` at line 13 char 8 (`FooBar` keyword) returned empty. Works at line 14 char 8 (the `struct FooBar {}` line). Need to position on the struct definition itself, not the keyword.
+
+Key advantage over rg: Captures `#[derive]` macro expansions that rg cannot find.
+
+### B6. Call hierarchy - PARTIAL
+
+**prepareCallHierarchy** - PASS:
+Returned `process_tensor` (kind: 12/Function, detail: `pub fn process_tensor(t: DenseTensor)`).
+
+**incomingCalls** - EMPTY:
+No results found for incomingCalls on `process_tensor`.
+
+**outgoingCalls** - EMPTY:
+No results found for outgoingCalls on `process_tensor`.
+
+Analysis: `process_tensor` is called from `main` (line 9), but incomingCalls returned empty. This may be a rust-analyzer limitation for simple projects or the call hierarchy requires a call graph index.
+
+### B7. documentSymbol - PASS
+
 ```
-./src/foo/DenseTensor.rs
-```
-
-Result: Found the file containing the struct definition using `(?!\w)` lookahead.
-
----
-
-### Test 5: Candidate gathering (with test exclusion)
-
-```bash
-#!/bin/bash
-cd .tmp/testrepo
-SYMBOL_NAME="DenseTensor"
-PACKAGE_ROOT="."
-KEYWORDS="struct|fn"
-SYMBOL_ESCAPED=$(echo "$SYMBOL_NAME" | sd '[\[\]\.\*\+\?\^\$\{\}\(\)\|\\]' '\\$0')
-candidates=$(rg -nP "(${KEYWORDS})\s+${SYMBOL_ESCAPED}(?!\w)" "$PACKAGE_ROOT" -l | rg -v '/(test|spec|bench)/')
-echo "$candidates"
-```
-
-**Output**:
-```
-./src/foo/DenseTensor.rs
-```
-
-Result: Correctly excludes no files (no test/spec/bench dirs in this repo).
-
----
-
-### Test 6: Path transformation
-
-```bash
-#!/bin/bash
-cd .tmp/testrepo
-PACKAGE_ROOT="."
-PACKAGE_NAME="testrepo"
-SYMBOL_NAME="DenseTensor"
-candidates="./src/foo/DenseTensor.rs"
-echo "$candidates" | sd "^$PACKAGE_ROOT/" '' | sd '\.[^.]*$' '' | sd '^(.+)$' "#$PACKAGE_NAME/\$1/$SYMBOL_NAME"
+LSP(operation: "documentSymbol", filePath: "src/foo/dense_tensor.rs", line: 1, character: 1)
 ```
 
-**Output**:
-```
-#testrepo/src/foo/DenseTensor/DenseTensor
-```
+Result:
+1. `DenseTensor` (kind: 23/Struct, range: line 0-2)
+2. `data` (kind: 8/Field, range: line 1:4-1:22, containerName: "DenseTensor")
+3. `process_tensor` (kind: 12/Function, range: line 4:0-4:40)
 
-Result: Correctly strips package root, removes extension, and formats as `#package/path/component`.
+Key advantage: Structured hierarchy with nesting, kind tags, and containerName. rg needs multiple passes to reconstruct this.
 
----
+### B_foo. hover - PARTIAL (position-sensitive)
 
-### Test 7: Fallback search (rg -F fixed string)
+- char 12 on DenseTensor usage: returned `[null]`
+- char 8 on `#[derive]`: returned derive macro docs
+- char 7 on `struct` keyword: returned generic struct docs
 
-```bash
-#!/bin/bash
-cd .tmp/testrepo
-SYMBOL_NAME="DenseTensor"
-PACKAGE_ROOT="."
-rg -F -w "$SYMBOL_NAME" "$PACKAGE_ROOT" -l
-```
+Hover is useful but position-sensitive and may return generic docs instead of type-specific information.
 
-**Output**:
-```
-./src/foo/DenseTensor.rs
-```
+## Comparison: rg vs LSP
 
-Result: Fixed-string mode works correctly as fallback when keyword regex search returns nothing.
-
----
-
-### Test 8: Cross-reference discovery (CSV output with quoted context)
-
-```bash
-#!/bin/bash
-cd .tmp/testrepo
-SYMBOL_NAME="DenseTensor"
-SEARCH_PATH="."
-rg -n "$SYMBOL_NAME" "$SEARCH_PATH" | sd "^$SEARCH_PATH/" '' | sd '^(.+):(\d+):(.*)$' '$1,$2,"$3"'
-```
-
-**Output**:
-```
-src/foo/DenseTensor.rs,1,"struct DenseTensor { data: Vec<i32> }"
-src/foo/DenseTensor.rs,2,"fn process_tensor(t: DenseTensor) {}"
-```
-
-Result: CSV format `file,line,"context"` is correctly generated with quoted context field.
-
----
-
-### Test 9: Boundary behavior - (?!\w) vs \b for brackets
-
-This test demonstrates why `(?!\w)` is used instead of `\b` for bracket symbols.
-
-Test file `weird.rs` contains:
-```
-struct Foo[0] {}   (line 1)
-struct F[0]G {}     (line 2)
-struct F[0] {}      (line 3)
-```
-
-```bash
-#!/bin/bash
-cd .tmp/testrepo
-echo "=== Content of weird.rs ==="
-cat -n src/weird.rs
-echo "=== Search for F[0] with (?!\w) ==="
-SYMBOL_NAME="F[0]"
-SYMBOL_ESCAPED=$(echo "$SYMBOL_NAME" | sd '[\[\]\.\*\+\?\^\$\{\}\(\)\|\\]' '\\$0')
-rg -nP "struct\s+${SYMBOL_ESCAPED}(?!\w)" .
-```
-
-**Output**:
-```
-=== Content of weird.rs ===
-     1	struct Foo[0] {}
-     2	struct F[0]G {}
-     3	struct F[0] {}
-=== Search for F[0] with (?!\w) ===
-./src/weird.rs:3:struct F[0] {}
-```
-
-Result: `(?!\w)` correctly matches `F[0]` (line 3) but NOT `F[0]G` (line 2). With `\b`, the behavior would be reversed - it would incorrectly match `F[0]G` and fail to match `F[0]`.
-
----
-
-### Test 10: Cross-reference search patterns
-
-```bash
-#!/bin/bash
-cd .tmp/testrepo
-SYMBOL_NAME="DenseTensor"
-SEARCH_PATH="."
-SYMBOL_ESCAPED=$(echo "$SYMBOL_NAME" | sd '[\[\]\.\*\+\?\^\$\{\}\(\)\|\\]' '\\$0')
-
-echo "=== 1. Import-style: use DenseTensor ==="
-echo "use DenseTensor;" > /tmp/test_import.rs
-rg -nP "(import|use|require|from|include)\b.*${SYMBOL_ESCAPED}(?!\w)" /tmp/test_import.rs
-
-echo "=== 2. Call pattern: DenseTensor() ==="
-echo "DenseTensor()" > /tmp/test_call.rs
-rg -nP "${SYMBOL_ESCAPED}(?!\w)\s*\(" /tmp/test_call.rs
-
-echo "=== 3. Member pattern: DenseTensor.foo ==="
-echo "DenseTensor.foo" > /tmp/test_member.rs
-rg -nP "${SYMBOL_ESCAPED}(?!\w)[\.:]" /tmp/test_member.rs
-
-echo "=== 4. Fallback: -F -w ==="
-rg -F -w "$SYMBOL_NAME" /tmp/test_import.rs /tmp/test_call.rs /tmp/test_member.rs
-
-rm /tmp/test_import.rs /tmp/test_call.rs /tmp/test_member.rs
-```
-
-**Output**:
-```
-=== 1. Import-style: use DenseTensor ===
-/tmp/test_import.rs:1:use DenseTensor;
-=== 2. Call pattern: DenseTensor() ===
-/tmp/test_call.rs:1:DenseTensor()
-=== 3. Member pattern: DenseTensor.foo ===
-/tmp/test_member.rs:1:DenseTensor.foo
-=== 4. Fallback: -F -w ===
-/tmp/test_import.rs:1:use DenseTensor;
-/tmp/test_call.rs:1:DenseTensor()
-/tmp/test_member.rs:1:DenseTensor.foo
-```
-
-Result: All cross-reference search patterns work correctly with the escaped symbol.
-
----
+| Aspect | rg-based (default) | LSP-based (Rust) | Observations |
+|--------|--------------------|--------------------|--------------|
+| Definition search | Regex keyword match | workspaceSymbol + goToDefinition | LSP resolves through module system |
+| Cross-references | Import/call/member patterns | findReferences (exact, semantic) | LSP identifies type-position refs |
+| Re-exports | Missed or false positive | Resolved via goToDefinition | LSP traced `use` to definition |
+| Trait impls | `impl.*for` grep | goToImplementation | LSP found `#[derive]` expansions |
+| Call relationships | `symbol(` pattern | incomingCalls/outgoingCalls | **LSP returned empty for this test** |
+| Module contents | Regex per file | documentSymbol (structured) | LSP gave hierarchy with containerName |
+| Macro expansions | Not found | Partially found | LSP found derive impls via goToImplementation |
+| Build artifacts | Needs `--glob '!target'` | Not searched | LSP is semantic-only |
+| Position sensitivity | N/A | Critical | goToImplementation needs exact struct position |
 
 ## Summary
 
-| Test | Description | Status |
-|------|-------------|--------|
-| 1 | Symbol escape (CamelCase) | PASS |
-| 2 | Symbol escape (with brackets) | PASS |
-| 3 | Symbol escape (F[0] negative case) | PASS |
-| 4 | Definition search with (?!\w) | PASS |
-| 5 | Candidate gathering | PASS |
-| 6 | Path transformation | PASS |
-| 7 | Fallback search (rg -F) | PASS |
-| 8 | Cross-reference discovery CSV | PASS |
-| 9 | Boundary behavior (?!\w) | PASS |
-| 10 | Cross-reference search patterns | PASS |
+| Test | Operation | Result |
+|------|-----------|--------|
+| B2 | workspaceSymbol | PASS |
+| B3 | goToDefinition | PASS |
+| B4 | findReferences | PASS |
+| B5 | goToImplementation | PASS (position-sensitive) |
+| B6 | prepareCallHierarchy | PASS |
+| B6 | incomingCalls | EMPTY |
+| B6 | outgoingCalls | EMPTY |
+| B7 | documentSymbol | PASS |
+| B_foo | hover | PARTIAL (position-sensitive) |
 
-All tests passed. The replacement of `python3` with `sd` for regex escaping and `\b` with `(?!\w)` for proper word boundaries is verified working.
-
-## Key Changes from Original
-
-1. **Removed python3 dependency**: Symbol escaping now uses `sd` only
-2. **Added `\]` to escape pattern**: `[\[\]\.\*\+\?\^\$\{\}\(\)\|\\]` handles both `[` and `]`
-3. **Replaced `\b` with `(?!\w)`**: Proper boundary that works for bracket symbols
-4. **Added `-P` flag**: PCRE2 engine required for lookahead `(?!\w)`
-5. **Quoted CSV context field**: `'$1,$2,"$3"'` prevents comma-splitting in context
+**Key finding**: `incomingCalls`/`outgoingCalls` returned empty for `process_tensor` despite being called from `main`. This may be a rust-analyzer limitation or requires more project complexity. The other 5 operations (workspaceSymbol, goToDefinition, findReferences, goToImplementation, documentSymbol) all work reliably.
